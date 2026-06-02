@@ -35,7 +35,12 @@ it('ingests incoming webhooks and queues them for active destinations', function
     ];
 
     // 2. Act:
-    $response = $this->postJson(route('webhooks.ingest', $source), $payload);
+    $timestamp = time();
+    $rawPayload = json_encode($payload);
+    $signature = hash_hmac('sha256', $timestamp.'.'.$rawPayload, $source->signing_secret);
+
+    $response = $this->postJson(route('webhooks.ingest', $source), $payload, ['X-Webhook-Signature' => $signature,
+        'X-Webhook-Timestamp' => $timestamp, ]);
 
     // 3. Assert:
     $response->assertStatus(202);
@@ -172,7 +177,7 @@ it('trips the circuit breaker and blocks outgoing HTTP requests after 5 failures
         'rate_limit_per_minute' => 60,
         'retry_count' => 3,
     ]);
-    
+
     $destination->circuit_breaker_failures = 4;
     $destination->save();
 
@@ -208,4 +213,100 @@ it('trips the circuit breaker and blocks outgoing HTTP requests after 5 failures
 
     // Assert that no new HTTP requests were sent (meaning the count remains at 1 from the 5th failure)
     Http::assertSentCount(1);
+});
+it('rejects webhooks with missing security headers', function () {
+    $source = Source::create([
+        'name' => 'Stripe Payments Test',
+        'signing_secret' => 'whsec_testsecret123',
+        'is_active' => true,
+    ]);
+
+    $response = $this->postJson(route('webhooks.ingest', $source), ['data' => 'test']);
+    $response->assertStatus(401);
+});
+
+it('rejects webhooks with invalid signatures', function () {
+    $source = Source::create([
+        'name' => 'Stripe Payments Test',
+        'signing_secret' => 'whsec_testsecret123',
+        'is_active' => true,
+    ]);
+
+    $response = $this->postJson(
+        route('webhooks.ingest', $source),
+        ['data' => 'test'],
+        [
+            'X-Webhook-Signature' => 'invalid-sig',
+            'X-Webhook-Timestamp' => time(),
+        ]
+    );
+    $response->assertStatus(401);
+});
+it('rate limits incoming per source', function () {
+    // Arrange
+    Queue::fake();
+    $source = Source::create([
+        'name' => 'Stripe Payment Test',
+        'signing_secret' => 'signing_secret',
+        'is_active' => true,
+    ]);
+    $destination = Destination::create([
+        'source_id' => $source->id,
+        'url' => 'https://webhook.site/test-endpoint',
+        'is_active' => true,
+        'rate_limit_per_minute' => 60,
+        'retry_count' => 3,
+    ]);
+    $payload = ['event' => 'user.created'];
+    $timestamp = time();
+    $rawPayload = json_encode($payload);
+    $signature = hash_hmac('sha256', $timestamp.'.'.$rawPayload, $source->signing_secret);
+    for ($i = 0; $i < 60; $i++) {
+        $response = $this->postJson(
+            route('webhooks.ingest', $source),
+            $payload,
+            [
+                'X-Webhook-Signature' => $signature,
+                'X-Webhook-Timestamp' => $timestamp,
+            ]
+        );
+        $response->assertStatus(202);
+    }
+    // 3. Act & Assert: The 61st request should fail with 429 Too Many Requests
+    $response = $this->postJson(
+        route('webhooks.ingest', $source),
+        $payload,
+        [
+            'X-Webhook-Signature' => $signature,
+            'X-Webhook-Timestamp' => $timestamp,
+        ]
+    );
+    $response->assertStatus(429);
+});
+it('fails the job if the destination URL is not HTTPS', function () {
+    // 1. Arrange
+    $source = Source::create([
+        'name' => 'Stripe Payments Test',
+        'signing_secret' => 'whsec_testsecret123',
+        'is_active' => true,
+    ]);
+    // Use insecure HTTP url
+    $destination = Destination::create([
+        'source_id' => $source->id,
+        'url' => 'http://insecure-webhook.site',
+        'is_active' => true,
+        'rate_limit_per_minute' => 60,
+        'retry_count' => 3,
+    ]);
+    $webhook = Webhook::create([
+        'source_id' => $source->id,
+        'payload' => ['event' => 'user.created'],
+        'headers' => [],
+        'event_type' => 'user.created',
+        'status' => 'pending',
+    ]);
+    // 2. Act
+    $job = new DeliveryWebhookJob($webhook, $destination);
+    // We expect the job to throw an Exception because of the HTTP URL
+    expect(fn () => $job->handle())->toThrow(Exception::class, 'Insecure destination URL: must use HTTPS.');
 });

@@ -30,6 +30,9 @@ class DeliveryWebhookJob implements ShouldQueue
 
     public function handle(): void
     {
+        if (! str_starts_with($this->destination->url, 'https://')) {
+            throw new Exception('Insecure destination URL: must use HTTPS.');
+        }
         // STEP 1: Circuit Breaker Guard Clause.
         if ($this->destination->isCircuitOpen()) {
             $this->release(300); // 5-minute delay
@@ -57,6 +60,7 @@ class DeliveryWebhookJob implements ShouldQueue
 
         // STEP 6: Execute the HTTP request inside a try-catch block.
         try {
+
             $response = Http::withHeaders($headers)
                 ->timeout(10)
                 ->post($this->destination->url, $payload);
@@ -67,7 +71,7 @@ class DeliveryWebhookJob implements ShouldQueue
                 $this->logDelivery($attempt, $headers, $duration, $response, 'success');
                 $this->handleSuccess();
             } else {
-                $errorMessage = 'Server returned status code: ' . $response->status();
+                $errorMessage = 'Server returned status code: '.$response->status();
                 $this->logDelivery($attempt, $headers, $duration, $response, 'failed', $errorMessage);
                 $this->handleFailure($attempt, $errorMessage);
             }
@@ -112,7 +116,7 @@ class DeliveryWebhookJob implements ShouldQueue
         if ($this->destination->circuit_breaker_failures >= 5) {
             $this->destination->circuit_breaker_opened_at = now();
             $this->destination->save();
-            Log::warning('Circuit breaker tripped for destination: ' . $this->destination->id);
+            Log::warning('Circuit breaker tripped for destination: '.$this->destination->id);
         }
 
         // STEP 11: Implement retry logic with Exponential Backoff + Jitter.

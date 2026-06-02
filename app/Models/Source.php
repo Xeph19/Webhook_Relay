@@ -12,6 +12,8 @@ class Source extends Model
 
     protected $fillable = ['name', 'signing_secret', 'is_active'];
 
+    protected $casts = ['signing_secret' => 'encrypted'];
+
     public function destinations(): HasMany
     {
         return $this->hasMany(Destination::class);
