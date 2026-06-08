@@ -11,8 +11,10 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use App\Events\CircuitBreakerTripped;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 
 class DeliveryWebhookJob implements ShouldQueue
 {
@@ -30,6 +32,22 @@ class DeliveryWebhookJob implements ShouldQueue
 
     public function handle(): void
     {
+        // Rate Limiter
+        $limiterKey = 'destination-limit:'.$this->destination->id;
+        $maxAttempts = $this->destination->rate_limit_per_minute;
+        $executed = RateLimiter::attempt(
+            $limiterKey,
+            $maxAttempts,
+            fn () => true,
+            60
+        );
+
+        if (! $executed) {
+            $this->release(10);
+
+            return;
+        }
+
         if (! str_starts_with($this->destination->url, 'https://')) {
             throw new Exception('Insecure destination URL: must use HTTPS.');
         }
@@ -117,6 +135,7 @@ class DeliveryWebhookJob implements ShouldQueue
             $this->destination->circuit_breaker_opened_at = now();
             $this->destination->save();
             Log::warning('Circuit breaker tripped for destination: '.$this->destination->id);
+            CircuitBreakerTripped::dispatch($this->destination);
         }
 
         // STEP 11: Implement retry logic with Exponential Backoff + Jitter.

@@ -12,6 +12,10 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
+use App\Events\CircuitBreakerTripped;
+use App\Listeners\LogCircuitBreakerTrip;
+use Illuminate\Support\Facades\Event;
+
 class AppServiceProvider extends ServiceProvider
 {
     /**
@@ -33,8 +37,13 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(60)->by($identifier ?: $request->ip());
         });
-        $this->configureDefaults();
 
+        Event::listen(
+            CircuitBreakerTripped::class,
+            LogCircuitBreakerTrip::class
+        );
+
+        $this->configureDefaults();
     }
 
     /**

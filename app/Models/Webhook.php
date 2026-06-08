@@ -18,9 +18,16 @@ class Webhook extends Model
         return $this->belongsTo(Source::class);
     }
 
-    public function destinations(): HasMany
+    public function destinations(): \Illuminate\Database\Eloquent\Relations\HasManyThrough
     {
-        return $this->hasMany(Destination::class);
+        return $this->hasManyThrough(
+            Destination::class,
+            Source::class,
+            'id',          // Local key on sources table
+            'source_id',   // Foreign key on destinations table
+            'source_id',   // Foreign key on webhooks table
+            'id'           // Local key on sources table
+        );
     }
 
     protected function casts(): array

@@ -310,3 +310,137 @@ it('fails the job if the destination URL is not HTTPS', function () {
     // We expect the job to throw an Exception because of the HTTP URL
     expect(fn () => $job->handle())->toThrow(Exception::class, 'Insecure destination URL: must use HTTPS.');
 });
+
+it('verifies that Webhook model destinations relationship is resolved correctly using HasManyThrough', function () {
+    $source = Source::create([
+        'name' => 'Stripe Payments Test',
+        'signing_secret' => 'whsec_testsecret123',
+        'is_active' => true,
+    ]);
+
+    $destination1 = Destination::create([
+        'source_id' => $source->id,
+        'url' => 'https://webhook.site/endpoint-1',
+        'is_active' => true,
+        'rate_limit_per_minute' => 60,
+        'retry_count' => 3,
+    ]);
+
+    $destination2 = Destination::create([
+        'source_id' => $source->id,
+        'url' => 'https://webhook.site/endpoint-2',
+        'is_active' => true,
+        'rate_limit_per_minute' => 60,
+        'retry_count' => 3,
+    ]);
+
+    $webhook = Webhook::create([
+        'source_id' => $source->id,
+        'payload' => ['event' => 'user.created'],
+        'headers' => [],
+        'event_type' => 'user.created',
+        'status' => 'pending',
+    ]);
+
+    expect($webhook->destinations)->toHaveCount(2);
+    expect($webhook->destinations->pluck('id'))->toContain($destination1->id, $destination2->id);
+});
+
+it('rate limits DeliveryWebhookJob based on destination limits', function () {
+    Http::fake([
+        '*' => Http::response('OK', 200),
+    ]);
+
+    $source = Source::create([
+        'name' => 'Stripe Payments Test',
+        'signing_secret' => 'whsec_testsecret123',
+        'is_active' => true,
+    ]);
+
+    // Destination with rate limit = 1 per minute
+    $destination = Destination::create([
+        'source_id' => $source->id,
+        'url' => 'https://webhook.site/rate-limited-endpoint',
+        'is_active' => true,
+        'rate_limit_per_minute' => 1,
+        'retry_count' => 3,
+    ]);
+
+    $webhook1 = Webhook::create([
+        'source_id' => $source->id,
+        'payload' => ['event' => 'user.created'],
+        'headers' => [],
+        'event_type' => 'user.created',
+        'status' => 'pending',
+    ]);
+
+    $webhook2 = Webhook::create([
+        'source_id' => $source->id,
+        'payload' => ['event' => 'user.updated'],
+        'headers' => [],
+        'event_type' => 'user.updated',
+        'status' => 'pending',
+    ]);
+
+    // 1st request should pass through rate limiter
+    $job1 = new DeliveryWebhookJob($webhook1, $destination);
+    $job1->handle();
+    $this->assertDatabaseHas('deliveries', [
+        'webhook_id' => $webhook1->id,
+        'status' => 'success',
+    ]);
+
+    // 2nd request within same minute should be rate limited
+    $job2 = new DeliveryWebhookJob($webhook2, $destination);
+    $job2->handle();
+
+    // The second delivery log should NOT exist because the job was released and returned early
+    $this->assertDatabaseMissing('deliveries', [
+        'webhook_id' => $webhook2->id,
+    ]);
+});
+
+it('dispatches CircuitBreakerTripped event and logs an error when the circuit breaker trips', function () {
+    Http::fake([
+        '*' => Http::response('Error', 500),
+    ]);
+
+    $source = Source::create([
+        'name' => 'Stripe Payments Test',
+        'signing_secret' => 'whsec_testsecret123',
+        'is_active' => true,
+    ]);
+
+    $destination = Destination::create([
+        'source_id' => $source->id,
+        'url' => 'https://webhook.site/fail-endpoint',
+        'is_active' => true,
+        'rate_limit_per_minute' => 60,
+        'retry_count' => 3,
+    ]);
+
+    $destination->circuit_breaker_failures = 4;
+    $destination->save();
+
+    $loggedMessage = null;
+    \Illuminate\Support\Facades\Event::listen(\Illuminate\Log\Events\MessageLogged::class, function ($event) use (&$loggedMessage) {
+        if ($event->level === 'error') {
+            $loggedMessage = $event->message;
+        }
+    });
+
+    $webhook = Webhook::create([
+        'source_id' => $source->id,
+        'payload' => ['event' => 'user.created'],
+        'headers' => [],
+        'event_type' => 'user.created',
+        'status' => 'pending',
+    ]);
+
+    $job = new DeliveryWebhookJob($webhook, $destination);
+    $job->handle();
+
+    expect($loggedMessage)->not->toBeNull();
+    expect($loggedMessage)->toContain('CRITICAL: Circuit breaker tripped');
+    expect($loggedMessage)->toContain($destination->url);
+});

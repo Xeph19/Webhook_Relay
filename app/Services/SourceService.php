@@ -41,7 +41,7 @@ class SourceService
     {
         $source = Source::create($data);
         Cache::tags(['sources'])->flush();
-        SourceJob::dispatch($source);
+        SourceJob::dispatchSync($source);
 
         return $source;
     }
@@ -55,7 +55,7 @@ class SourceService
     {
         $source->update($data);
         Cache::tags(['sources'])->flush();
-        SourceJob::dispatch($source);
+        SourceJob::dispatchSync($source);
 
         return $source;
     }

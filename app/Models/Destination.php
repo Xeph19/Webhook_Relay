@@ -24,6 +24,7 @@ class Destination extends Model
     {
         return [
             'circuit_breaker_opened_at' => 'datetime',
+            'is_active' => 'boolean',
         ];
     }
     /**

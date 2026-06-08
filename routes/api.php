@@ -11,5 +11,5 @@ Route::get('/user', function (Request $request) {
 
 Route::prefix('/v1')->group(function () {
     Route::post('/ingestion/{source}', WebhookIngestionController::class)->name('webhooks.ingest')->middleware(['webhook.signature', 'throttle:webhooks']);
-    Route::apiResource('sources', SourceController::class);
+    Route::apiResource('sources', SourceController::class)->middleware('auth:sanctum');
 });

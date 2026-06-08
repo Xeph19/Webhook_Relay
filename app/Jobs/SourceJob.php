@@ -45,7 +45,10 @@ class SourceJob implements ShouldQueue
         Log::error("Source failed for source: {$this->source->id}: ".$exception->getMessage());
     }
  
-    protected function performActivationSetup(): void {}
+    protected function performActivationSetup(): void
+    {
+        $this->source->destinations()->update(['is_active' => true]);
+    }
  
     protected function performDeactivationCleanup(): void
     {
