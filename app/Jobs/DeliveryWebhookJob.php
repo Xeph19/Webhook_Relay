@@ -32,6 +32,16 @@ class DeliveryWebhookJob implements ShouldQueue
 
     public function handle(): void
     {
+        if (! $this->destination->source || ! $this->destination->source->is_active) {
+            Log::info("Skipping webhook delivery: Source is inactive.");
+            return;
+        }
+
+        if (! $this->destination->is_active) {
+            Log::info("Skipping webhook delivery: Destination is inactive.");
+            return;
+        }
+
         // Rate Limiter
         $limiterKey = 'destination-limit:'.$this->destination->id;
         $maxAttempts = $this->destination->rate_limit_per_minute;

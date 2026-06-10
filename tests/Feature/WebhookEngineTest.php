@@ -311,6 +311,68 @@ it('fails the job if the destination URL is not HTTPS', function () {
     expect(fn () => $job->handle())->toThrow(Exception::class, 'Insecure destination URL: must use HTTPS.');
 });
 
+it('skips delivery if the source is inactive', function () {
+    // Arrange
+    $source = Source::create([
+        'name' => 'Inactive Source',
+        'signing_secret' => 'whsec_testsecret123',
+        'is_active' => false,
+    ]);
+    $destination = Destination::create([
+        'source_id' => $source->id,
+        'url' => 'https://webhook.site/inactive-source-test',
+        'is_active' => true,
+        'rate_limit_per_minute' => 60,
+        'retry_count' => 3,
+    ]);
+    $webhook = Webhook::create([
+        'source_id' => $source->id,
+        'payload' => ['event' => 'user.created'],
+        'headers' => [],
+        'event_type' => 'user.created',
+        'status' => 'pending',
+    ]);
+
+    // Act
+    Http::fake();
+    $job = new DeliveryWebhookJob($webhook, $destination);
+    $job->handle();
+
+    // Assert that no HTTP requests were sent
+    Http::assertSentCount(0);
+});
+
+it('skips delivery if the destination is inactive', function () {
+    // Arrange
+    $source = Source::create([
+        'name' => 'Active Source',
+        'signing_secret' => 'whsec_testsecret123',
+        'is_active' => true,
+    ]);
+    $destination = Destination::create([
+        'source_id' => $source->id,
+        'url' => 'https://webhook.site/inactive-dest-test',
+        'is_active' => false,
+        'rate_limit_per_minute' => 60,
+        'retry_count' => 3,
+    ]);
+    $webhook = Webhook::create([
+        'source_id' => $source->id,
+        'payload' => ['event' => 'user.created'],
+        'headers' => [],
+        'event_type' => 'user.created',
+        'status' => 'pending',
+    ]);
+
+    // Act
+    Http::fake();
+    $job = new DeliveryWebhookJob($webhook, $destination);
+    $job->handle();
+
+    // Assert that no HTTP requests were sent
+    Http::assertSentCount(0);
+});
+
 it('verifies that Webhook model destinations relationship is resolved correctly using HasManyThrough', function () {
     $source = Source::create([
         'name' => 'Stripe Payments Test',

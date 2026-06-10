@@ -14,19 +14,15 @@ class Delivery extends Model
     {
         return $this->belongsTo(Destination::class, 'destination_id');
     }
-    public function destinations(): BelongsTo
-    {
-        return $this->destination();
-    }
-    public function webhook():BelongsTo
+    public function webhook(): BelongsTo
     {
         return $this->belongsTo(Webhook::class);
     }
     protected function casts(): array
     {
         return [
-            'request_headers' => 'array',
-            'request_payload' => 'array',
+            'request_headers' => 'encrypted:array',
+            'request_payload' => 'encrypted:array',
             'response_headers' => 'array',
         ];
     }

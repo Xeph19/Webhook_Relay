@@ -10,11 +10,31 @@ use Illuminate\Support\Facades\Cache;
 
 class SourceService
 {
+    protected function supportsTags(): bool
+    {
+        return method_exists(Cache::getStore(), 'tags');
+    }
+
+    protected function clearCache(?string $sourceId = null): void
+    {
+        if ($this->supportsTags()) {
+            Cache::tags(['sources'])->flush();
+        } else {
+            for ($i = 1; $i <= 10; $i++) {
+                Cache::forget("source_page_{$i}");
+            }
+            if ($sourceId) {
+                Cache::forget("source:{$sourceId}");
+            }
+        }
+    }
+
     public function getAllSources(Request $request, int $limit = 10): LengthAwarePaginator
     {
         $page = $request->input('page', 1);
         $key = "source_page_{$page}";
-        $data = Cache::tags(['sources', $key])->remember($key, 60 * 60 * 24, function () use ($limit) {
+        
+        $retrieveData = function () use ($limit) {
             $sources = Source::query()
                 ->orderBy('created_at', 'desc')
                 ->limit($limit)
@@ -26,7 +46,13 @@ class SourceService
                 'per_page' => $sources->perPage(),
                 'current_page' => $sources->currentPage(),
             ];
-        });
+        };
+
+        if ($this->supportsTags()) {
+            $data = Cache::tags(['sources', $key])->remember($key, 60 * 60 * 24, $retrieveData);
+        } else {
+            $data = Cache::remember($key, 60 * 60 * 24, $retrieveData);
+        }
 
         return new LengthAwarePaginator(
             $data['data'],
@@ -40,7 +66,7 @@ class SourceService
     public function createSource(array $data)
     {
         $source = Source::create($data);
-        Cache::tags(['sources'])->flush();
+        $this->clearCache();
         SourceJob::dispatchSync($source);
 
         return $source;
@@ -54,7 +80,7 @@ class SourceService
     public function updateSource(Source $source, array $data)
     {
         $source->update($data);
-        Cache::tags(['sources'])->flush();
+        $this->clearCache($source->id);
         SourceJob::dispatchSync($source);
 
         return $source;
@@ -62,8 +88,9 @@ class SourceService
 
     public function deleteSource(Source $source)
     {
+        $sourceId = $source->id;
         $source->delete();
-        Cache::tags(['sources'])->flush();
+        $this->clearCache($sourceId);
 
         return true;
     }

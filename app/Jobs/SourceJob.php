@@ -47,11 +47,11 @@ class SourceJob implements ShouldQueue
  
     protected function performActivationSetup(): void
     {
-        $this->source->destinations()->update(['is_active' => true]);
+        Log::info("Activation setup for source: {$this->source->name}");
     }
  
     protected function performDeactivationCleanup(): void
     {
-        $this->source->destinations()->update(['is_active' => false]);
+        Log::info("Deactivation cleanup for source: {$this->source->name}");
     }
 }

@@ -113,7 +113,7 @@ it('deletes a source', function () {
     ]);
 });
 
-it('activates and deactivates destinations when SourceJob runs', function () {
+it('preserves manual destination activation states when SourceJob runs', function () {
     // Arrange
     $source = Source::factory()->create(['is_active' => false]);
     $destination = Destination::create([
@@ -124,20 +124,11 @@ it('activates and deactivates destinations when SourceJob runs', function () {
         'retry_count' => 3,
     ]);
 
-    // Act - Deactivation path
+    // Act
     $job = new SourceJob($source);
     $job->handle();
 
-    // Assert deactivation
-    $destination->refresh();
-    expect($destination->is_active)->toBeFalse();
-
-    // Act - Activation path
-    $source->update(['is_active' => true]);
-    $job = new SourceJob($source);
-    $job->handle();
-
-    // Assert activation
+    // Assert destination state is not overridden (remains active/true)
     $destination->refresh();
     expect($destination->is_active)->toBeTrue();
 });

@@ -43,9 +43,16 @@ class SourceController extends Controller
      */
     public function show(Source $source)
     {
-        $data = Cache::tags(['sources'])->rememberForever('source:'.$source->id, function () use ($source) {
+        $key = 'source:'.$source->id;
+        $retrieve = function () use ($source) {
             return $source;
-        });
+        };
+
+        if (method_exists(Cache::getStore(), 'tags')) {
+            $data = Cache::tags(['sources'])->rememberForever($key, $retrieve);
+        } else {
+            $data = Cache::rememberForever($key, $retrieve);
+        }
 
         return response()->json($data);
     }
